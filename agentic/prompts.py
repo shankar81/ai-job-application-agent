@@ -6,7 +6,7 @@ No LLM calls happen here — pure string construction only.
 
 import json
 
-from agentic.memory import _load_human_answers
+from agentic.memory import _load_human_answers, _load_private_profile
 
 
 def build_profile_prompt(pdf_text: str) -> str:
@@ -199,8 +199,16 @@ def build_fill_form_prompt(state: dict) -> str:
     PERSONAL DETAILS
     --------------------------------------------------
 
-    Use CANDIDATE PROFILE and HUMAN ANSWER MEMORY for personal details.
+    Use CANDIDATE PROFILE, PRIVATE PROFILE, and HUMAN ANSWER MEMORY for personal details.
     Do not invent private details that are not present there.
+
+    --------------------------------------------------
+    PRIVATE PROFILE (local only, not committed)
+    --------------------------------------------------
+
+    These are private local facts and preferences. Use them for matching form questions.
+
+    {json.dumps(_load_private_profile(), indent=2)}
 
     --------------------------------------------------
     WORK AUTHORIZATION

@@ -13,6 +13,7 @@ from datetime import datetime
 from agentic.tools import read_file, write_file
 
 HUMAN_ANSWERS_PATH = "./storage/human_answers.json"
+PRIVATE_PROFILE_PATH = "./storage/private_profile.json"
 
 
 def _normalize_key(label: str) -> str:
@@ -26,6 +27,16 @@ def _load_human_answers() -> dict:
     if os.path.exists(HUMAN_ANSWERS_PATH):
         try:
             return json.loads(read_file(HUMAN_ANSWERS_PATH))
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+
+def _load_private_profile() -> dict:
+    """Load private local profile data such as address, salary, and preferences."""
+    if os.path.exists(PRIVATE_PROFILE_PATH):
+        try:
+            return json.loads(read_file(PRIVATE_PROFILE_PATH))
         except (json.JSONDecodeError, OSError):
             return {}
     return {}

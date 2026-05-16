@@ -31,6 +31,7 @@ PROJECT_CONTEXT.md
 storage/resume.pdf
 storage/candidate_profile.json
 storage/human_answers.json
+storage/private_profile.json
 storage/resume_hash.txt
 storage/jobs.xlsx
 
