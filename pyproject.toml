@@ -13,4 +13,8 @@ dependencies = [
     "pypdf>=6.11.0",
     "pytest-playwright>=0.7.2",
     "python-dotenv>=1.2.2",
+    # Lets stdlib urllib use the macOS/Windows system trust store so corporate
+    # VPN / antivirus / Zscaler root CAs work without bypassing TLS verification.
+    # Required by agentic/telegram/client.py.
+    "truststore>=0.10.0",
 ]

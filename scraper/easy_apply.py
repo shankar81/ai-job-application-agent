@@ -3,6 +3,21 @@ from playwright.async_api import Locator, Page, TimeoutError as PWTimeout
 from agentic.agent import app, checkpoint_config
 from scraper.helpers import fill_field, handle_inputs, job_label, screenshot_path
 
+
+class EasyApplyAborted(Exception):
+    """Raised when the agent intentionally aborts an in-progress application.
+
+    Currently used when no human answer was available for a required field
+    (Telegram timed out or Telegram is not configured). The reason is
+    propagated to ``jobs.py`` so it can be recorded in ``jobs.xlsx`` without
+    halting the rest of the run.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 # Selector for the LinkedIn Easy Apply modal
 EASY_APPLY_MODAL_SELECTOR = 'div[data-test-modal-id="easy-apply-modal"]'
 EASY_APPLY_SELECTORS = [
@@ -56,6 +71,33 @@ async def dismiss_post_submit_modal(page: Page) -> None:
         await dismiss.click()
 
 
+async def close_easy_apply_modal(modal: Locator, page: Page) -> None:
+    """Best-effort dismissal of the Easy Apply modal without saving.
+
+    Clicks the modal's Dismiss (X) button, then clicks Discard on
+    LinkedIn's "Save application?" confirmation if it appears.
+
+    Failures are swallowed: if dismissal doesn't work, the next job-card
+    click will navigate away anyway.
+    """
+    try:
+        dismiss = modal.locator("button[aria-label*='Dismiss']").first
+        if await dismiss.count() > 0 and await dismiss.is_visible(timeout=1000):
+            await dismiss.click()
+    except Exception as exc:
+        print(f"[easy_apply] Modal dismiss click failed: {exc}")
+        return
+
+    # LinkedIn often surfaces a "Save application?" confirmation dialog.
+    # We don't want to save half-filled drafts, so click Discard.
+    try:
+        discard = page.get_by_role("button", name="Discard")
+        if await discard.count() > 0 and await discard.first.is_visible(timeout=1500):
+            await discard.first.click()
+    except Exception as exc:
+        print(f"[easy_apply] Discard click failed (safe to ignore): {exc}")
+
+
 async def find_easy_apply_button(page: Page) -> Locator | None:
     """Find the visible Easy Apply control, whether LinkedIn renders it as a link or button."""
     for selector in EASY_APPLY_SELECTORS:
@@ -89,6 +131,9 @@ async def easy_apply_flow(page: Page) -> bool:
 
         return await handle_easy_apply_form(easy_apply_modal, easy_apply_form)
 
+    except EasyApplyAborted:
+        # Intentional abort — modal already closed, no debug screenshot needed.
+        raise
     except Exception as exc:
         shot_path = screenshot_path(f"error-{await job_label(page)}", prefix="debug_")
         await page.screenshot(path=str(shot_path), full_page=True)
@@ -121,6 +166,16 @@ async def handle_easy_apply_form(
             {"job_url": page.url, "form_fields": form_response["form_fields"], "errors": form_response["errors"]},
             config=checkpoint_config,
         )
+
+        # Agent asked a question via Telegram and got no answer (timeout
+        # or Telegram not configured). Close the modal and propagate the
+        # reason — jobs.py will mark this application as failed.
+        if result.get("application_aborted"):
+            reason = result.get("aborted_reason", "no human answer")
+            print(f"[easy_apply] Aborting application: {reason}")
+            await close_easy_apply_modal(easy_apply_modal, page)
+            raise EasyApplyAborted(reason)
+
         print(f"[easy_apply] Filling {len(result['form_fields'])} pending fields.")
         for field in result["form_fields"]:
             await fill_field(page, field)

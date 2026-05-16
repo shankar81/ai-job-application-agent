@@ -5,7 +5,7 @@ from playwright.async_api import BrowserContext, Locator, Page
 
 from agentic.agent import app, checkpoint_config
 from agentic.tools import update_job_application_status
-from scraper.easy_apply import easy_apply_flow, has_easy_apply_button
+from scraper.easy_apply import EasyApplyAborted, easy_apply_flow, has_easy_apply_button
 
 AUTH_STATE_PATH = "auth.json"
 JOBS_SEARCH_SELECTOR = "a[href*='software+engineer+Easy+Apply']"
@@ -129,6 +129,17 @@ async def process_job_card(page: Page, card: Locator) -> Job:
                 "failed",
                 "Easy Apply unavailable or submit confirmation missing",
             )
+    except EasyApplyAborted as exc:
+        # Agent couldn't get a human answer (Telegram timeout / not
+        # configured). Record the reason and move on — do NOT re-raise,
+        # otherwise the whole run halts on a single missing answer.
+        print(f"[jobs] Application aborted: {exc.reason}")
+        update_job_application_status(
+            JOBS_FILE_PATH,
+            page.url,
+            "failed",
+            f"aborted: {exc.reason}"[:500],
+        )
     except Exception as exc:
         update_job_application_status(
             JOBS_FILE_PATH,

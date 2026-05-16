@@ -17,6 +17,7 @@ from langchain_openai import ChatOpenAI
 from agentic.memory import _load_human_answers, _save_human_answer
 from agentic.prompts import build_fill_form_prompt, build_match_prompt, build_profile_prompt
 from agentic.state import AgentState
+from agentic.telegram import TelegramNotConfigured, TelegramReplyTimeout, ask_user
 from agentic.tools import create_hash, read_file, read_pdf, write_file, write_jobs_to_csv
 
 load_dotenv()
@@ -55,13 +56,22 @@ def request_missing_required_information(field: str, question: str) -> dict:
         If a semantically similar key exists in memory, use that answer directly.
         Never use for already known personal details (name, email, phone, location, etc.).
     """
-    answer = input(f"\nQUESTION FOR USER: {question}\n> ")
-    _save_human_answer(field, question, answer)
+    # NOTE: this body is only used when the tool is invoked directly (e.g. from
+    # tests). In the normal LangGraph flow, ``fill_form`` intercepts the LLM's
+    # tool call and calls ``ask_user`` itself so it can pass job context
+    # (job_url) that isn't part of the LLM-visible tool schema.
+    try:
+        answer = ask_user(field=field, question=question)
+    except (TelegramReplyTimeout, TelegramNotConfigured) as exc:
+        return {
+            "field": field,
+            "answer": None,
+            "status": "no_answer",
+            "reason": str(exc),
+        }
 
-    return {
-        "field": field,
-        "answer": answer,
-    }
+    _save_human_answer(field, question, answer)
+    return {"field": field, "answer": answer, "status": "ok"}
 
 
 tools = [request_missing_required_information]
@@ -148,7 +158,18 @@ def match_jobs(state: AgentState) -> AgentState:
 
 
 def fill_form(state: AgentState) -> AgentState:
-    """Ask the LLM to fill form fields; recurse if the tool is called for missing info."""
+    """Ask the LLM to fill form fields; recurse if the tool is called for missing info.
+
+    When the LLM asks for missing information, we bypass the tool's
+    ``.invoke()`` and call ``ask_user`` directly so we can pass the current
+    ``job_url`` as context in the Telegram message. The tool body itself
+    doesn't see ``job_url`` because we don't want it on the LLM-visible
+    schema.
+
+    If ``ask_user`` raises (Telegram timeout or not configured) we set
+    ``application_aborted`` on the state and return immediately. ``easy_apply``
+    checks that flag and closes the modal without attempting to submit.
+    """
     print(f"[agent] Filling {len(state.get('form_fields') or [])} form fields.")
 
     prompt = build_fill_form_prompt(state)
@@ -158,16 +179,31 @@ def fill_form(state: AgentState) -> AgentState:
     if response.tool_calls:
         print("[agent] Missing required information requested.")
         for tool_call in response.tool_calls:
-            if tool_call["name"] == "request_missing_required_information":
-                tool_result = request_missing_required_information.invoke({
-                    "field": tool_call["args"]["field"],
-                    "question": tool_call["args"]["question"],
-                })
-                field = tool_result["field"]
-                answer = tool_result["answer"]
-                # _save_human_answer is called inside the tool itself;
-                # only update the in-session state here.
-                state["human_answers"][field] = answer
+            if tool_call["name"] != "request_missing_required_information":
+                continue
+
+            field = tool_call["args"].get("field", "")
+            question = tool_call["args"].get("question", "")
+
+            try:
+                answer = ask_user(
+                    field=field,
+                    question=question,
+                    job_context=state.get("job_url"),
+                )
+            except (TelegramReplyTimeout, TelegramNotConfigured) as exc:
+                # No human answer available — abort this application cleanly.
+                # easy_apply will close the modal and jobs.py will mark the
+                # row in jobs.xlsx as failed with this reason.
+                reason = f"{exc.__class__.__name__}: {exc}"
+                print(f"[agent] {reason}. Aborting application.")
+                state["application_aborted"] = "no_human_answer"
+                state["aborted_reason"] = reason
+                state["form_fields"] = []
+                return state
+
+            _save_human_answer(field, question, answer)
+            state.setdefault("human_answers", {})[field] = answer
 
         return fill_form(state)
 

@@ -18,11 +18,12 @@ The project scrapes LinkedIn job descriptions, compares each role against a resu
   - `not_applied`
   - `applied`
   - `skipped_low_score`
-  - `failed`
+  - `failed` (also covers `aborted: <reason>` when no Telegram reply arrived)
 - Handles multi-step Easy Apply forms.
 - Supports text inputs, selects, checkboxes, radios, and LinkedIn typeahead comboboxes.
 - Stores reusable human answers in `storage/human_answers.json`.
 - Loads private local profile data from `storage/private_profile.json`.
+- Sends unknown form questions to your phone via **Telegram** and waits for your reply — no need to be at the terminal. If you don't reply within the timeout, the application is marked `failed` in `jobs.xlsx` and the run continues with the next job.
 
 ## Architecture
 
@@ -66,7 +67,15 @@ automation/
 │   ├── prompts.py       # LLM prompt builders
 │   ├── memory.py        # Persistent human-answer memory
 │   ├── state.py         # Agent state typing
-│   └── tools.py         # PDF, Excel, hashing, and job helpers
+│   ├── tools.py         # PDF, Excel, hashing, and job helpers
+│   └── telegram/        # Telegram prompt layer (unknown-field questions to your phone)
+│       ├── config.py    # Env loading: TELEGRAM_BOT_TOKEN, CHAT_ID, timeouts
+│       ├── client.py    # Sync Telegram Bot API client (stdlib urllib + truststore)
+│       ├── formatter.py # Message templates
+│       └── prompt.py    # ask_user() — send + long-poll for reply
+│
+├── scripts/
+│   └── smoke_test_telegram.py  # Standalone send/reply test (run from your Mac)
 │
 ├── storage/
 │   ├── resume.pdf               # Local, ignored
@@ -93,6 +102,13 @@ Create a local `.env` file:
 OPENAI_API_KEY=your_api_key
 EMAIL=your_linkedin_email
 PASSWORD=your_linkedin_password
+
+# Telegram (optional but recommended — without these, any unknown form
+# field will fail the application instead of asking you for an answer)
+TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
+TELEGRAM_CHAT_ID=your_numeric_chat_id_from_userinfobot
+TELEGRAM_REPLY_TIMEOUT=300   # seconds to wait per attempt (default 5 min)
+TELEGRAM_MAX_ATTEMPTS=2      # initial send + N-1 reminders (default 2)
 ```
 
 Add your resume:
@@ -134,6 +150,30 @@ python scraper/main.py
 ```
 
 The browser uses a persistent profile in `userdata/`, so LinkedIn sessions can survive across runs.
+
+## Telegram Setup (Optional)
+
+When the agent hits a form field it can't answer from your resume, profile, or memory, it pushes the question to your Telegram chat and waits for your reply. This lets the bot run unattended on your laptop while you respond from your phone.
+
+**One-time setup:**
+
+1. Message [@BotFather](https://t.me/BotFather) on Telegram, send `/newbot`, follow prompts. Copy the token it gives you.
+2. Open a chat with your new bot and send `/start` (Telegram requires you to initiate contact before the bot can message you).
+3. Message [@userinfobot](https://t.me/userinfobot), copy the numeric `Id` it replies with.
+4. Put both into `.env` as `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
+
+**Verify it works:**
+
+```bash
+.venv/bin/python scripts/smoke_test_telegram.py           # send-only test
+.venv/bin/python scripts/smoke_test_telegram.py --reply   # send + wait for reply
+```
+
+For the `--reply` test, **long-press the message on your phone and choose "Reply"** before typing your answer. The bot matches replies by their `reply_to_message_id`, so a free-form message won't satisfy it (this avoids confusion when multiple questions queue up).
+
+**Behavior on no reply:** the bot waits `TELEGRAM_REPLY_TIMEOUT` seconds, sends a reminder, waits the same amount again, then marks the application `failed` in `jobs.xlsx` and moves on. The full run is never blocked by a single missing answer.
+
+**Corporate VPN / antivirus note:** the client uses [`truststore`](https://pypi.org/project/truststore/) so HTTPS calls to `api.telegram.org` work even when a Zscaler/Cisco-style TLS interceptor is in your network path.
 
 ## Data Outputs
 
