@@ -22,6 +22,7 @@ The project scrapes LinkedIn job descriptions, compares each role against a resu
 - Handles multi-step Easy Apply forms.
 - Supports text inputs, selects, checkboxes, radios, and LinkedIn typeahead comboboxes.
 - Stores reusable human answers in `storage/human_answers.json`.
+- Loads private local profile data from `storage/private_profile.json`.
 
 ## Architecture
 
@@ -68,12 +69,12 @@ automation/
 │   └── tools.py         # PDF, Excel, hashing, and job helpers
 │
 ├── storage/
-│   ├── resume.pdf
-│   ├── candidate_profile.json
-│   ├── human_answers.json
-│   └── jobs.xlsx
+│   ├── resume.pdf               # Local, ignored
+│   ├── candidate_profile.json   # Generated, ignored
+│   ├── private_profile.json     # Local private facts, ignored
+│   ├── human_answers.json       # Generated answer memory, ignored
+│   └── jobs.xlsx                # Generated tracking workbook, ignored
 │
-├── PROJECT_CONTEXT.md
 ├── pyproject.toml
 └── uv.lock
 ```
@@ -100,6 +101,32 @@ Add your resume:
 storage/resume.pdf
 ```
 
+Optionally add private local facts for form filling:
+
+```text
+storage/private_profile.json
+```
+
+Example shape:
+
+```json
+{
+  "location_details": {
+    "city": "Mumbai",
+    "state": "Maharashtra",
+    "country": "India"
+  },
+  "salary_details": {
+    "current_ctc": "example",
+    "expected_ctc": "example"
+  },
+  "application_preferences": {
+    "notice_period_days": 90,
+    "how_did_you_hear_about_us": "LinkedIn"
+  }
+}
+```
+
 Run:
 
 ```bash
@@ -123,9 +150,11 @@ The browser uses a persistent profile in `userdata/`, so LinkedIn sessions can s
 
 `storage/human_answers.json` stores answers provided during form filling so repeated questions can be reused later.
 
+`storage/private_profile.json` stores private local facts such as address, salary, notice period, work authorization, and application preferences. It is loaded into the form-fill prompt at runtime and intentionally ignored by git.
+
 ## Safety Notes
 
-- Keep `.env`, `userdata/`, `auth.json`, `storage/`, and screenshots private.
+- Keep `.env`, `userdata/`, `auth.json`, `storage/`, `PROJECT_CONTEXT.md`, and screenshots private.
 - Review applications periodically in LinkedIn to ensure submissions match your intent.
 - Do not expose resume, phone, salary, auth state, browser profile, or prompt logs in a public repo.
 - Use match-score gating and company review to avoid low-quality or irrelevant applications.
