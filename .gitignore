@@ -1,0 +1,40 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+*.env
+auth.json
+scraper/auth.json
+
+# Playwright / browser session state
+userdata/
+scraper/userdata/
+
+# Runtime output
+screenshots/
+
+# Local project notes / personal handoff context
+PROJECT_CONTEXT.md
+
+# Local candidate/job data
+storage/resume.pdf
+storage/candidate_profile.json
+storage/human_answers.json
+storage/resume_hash.txt
+storage/jobs.xlsx
+
+# OS/editor noise
+.DS_Store
+**/.DS_Store
+.vscode/
