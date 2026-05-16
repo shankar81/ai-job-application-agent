@@ -5,6 +5,12 @@ from scraper.helpers import fill_field, handle_inputs, job_label, screenshot_pat
 
 # Selector for the LinkedIn Easy Apply modal
 EASY_APPLY_MODAL_SELECTOR = 'div[data-test-modal-id="easy-apply-modal"]'
+EASY_APPLY_SELECTORS = [
+    "a[aria-label*='Easy Apply']",
+    "button[aria-label*='Easy Apply']",
+    "a:has-text('Easy Apply')",
+    "button:has-text('Easy Apply')",
+]
 
 # Post-apply confirmation modal — stable via aria-labelledby set by LinkedIn
 POST_SUBMIT_SELECTOR = '[data-test-modal][aria-labelledby="post-apply-modal"]'
@@ -50,11 +56,29 @@ async def dismiss_post_submit_modal(page: Page) -> None:
         await dismiss.click()
 
 
+async def find_easy_apply_button(page: Page) -> Locator | None:
+    """Find the visible Easy Apply control, whether LinkedIn renders it as a link or button."""
+    for selector in EASY_APPLY_SELECTORS:
+        locator = page.locator(selector).first
+        try:
+            if await locator.count() > 0 and await locator.is_visible(timeout=1000):
+                return locator
+        except PWTimeout:
+            continue
+
+    return None
+
+
+async def has_easy_apply_button(page: Page) -> bool:
+    return await find_easy_apply_button(page) is not None
+
+
 async def easy_apply_flow(page: Page) -> bool:
     """Entry point: click Easy Apply and hand off to the step handler."""
     try:
-        easy_apply = page.locator("a[aria-label*='Easy Apply']").first
-        if not await easy_apply.is_visible(timeout=3000):
+        easy_apply = await find_easy_apply_button(page)
+        if easy_apply is None:
+            print("[easy_apply] Easy Apply button not visible.")
             return False
         await easy_apply.click()
 

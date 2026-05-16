@@ -5,7 +5,7 @@ from playwright.async_api import BrowserContext, Locator, Page
 
 from agentic.agent import app, checkpoint_config
 from agentic.tools import update_job_application_status
-from scraper.easy_apply import easy_apply_flow
+from scraper.easy_apply import easy_apply_flow, has_easy_apply_button
 
 AUTH_STATE_PATH = "auth.json"
 JOBS_SEARCH_SELECTOR = "a[href*='software+engineer+Easy+Apply']"
@@ -15,6 +15,7 @@ JOBS_CONTAINER_SELECTOR = "div[data-testid='lazy-column']"
 JOB_CARD_SELECTOR = "div[role='button'][componentkey]"
 MATCH_SCORE_THRESHOLD = 5
 JOBS_FILE_PATH = "./storage/jobs.xlsx"
+EXTERNAL_APPLY_STATUS = "external_apply_required"
 
 
 class Job(TypedDict):
@@ -79,17 +80,34 @@ async def process_job_card(page: Page, card: Locator) -> Job:
         "JD": (await card.text_content() or "") + (await extract_job_details(page=page)),
     }
 
-    if await page.get_by_text("Application submitted").is_visible():
-        print("[jobs] Already marked applied in XLS, skipping Easy Apply.")
+    if await is_already_applied(page):
+        print("[jobs] LinkedIn shows already applied, skipping match and Easy Apply.")
+        update_job_application_status(JOBS_FILE_PATH, page.url, "applied")
         return job
+
+    if not await has_easy_apply_button(page):
+        status = EXTERNAL_APPLY_STATUS if await has_external_apply_button(page) else "failed"
+        error = "" if status == EXTERNAL_APPLY_STATUS else "No Easy Apply button available"
+        print(f"[jobs] Easy Apply unavailable, marking {status}.")
+        update_job_application_status(
+            JOBS_FILE_PATH,
+            page.url,
+            status,
+            error,
+        )
+        return job
+
     result = app.invoke({"job_url": page.url, "raw_job_desc": job, "form_fields": None}, config=checkpoint_config)
     match_score = float(result.get("match_score", 0) or 0)
     application_status = result.get("application_status", "not_applied")
     print(f"[jobs] Match score: {match_score}")
 
     if application_status == "applied":
-        print("[jobs] Already marked applied in XLS, skipping Easy Apply.")
-        return job
+        if await has_easy_apply_button(page):
+            print("[jobs] XLS says applied, but Easy Apply is visible; continuing.")
+        else:
+            print("[jobs] XLS status is already applied, skipping Easy Apply.")
+            return job
 
     if match_score <= MATCH_SCORE_THRESHOLD:
         print(f"[jobs] Match score <= {MATCH_SCORE_THRESHOLD}, skipping Easy Apply.")
@@ -121,6 +139,31 @@ async def process_job_card(page: Page, card: Locator) -> Job:
         raise
 
     return job
+
+
+async def is_already_applied(page: Page) -> bool:
+    """Detect LinkedIn's selected-job application status before scoring."""
+    details_panel = page.locator(JOBS_CONTAINER_SELECTOR).last
+    status_selectors = [
+        "text=/^Application submitted$/i",
+        "text=/^Applied$/i",
+    ]
+
+    for selector in status_selectors:
+        if await details_panel.locator(selector).count() > 0:
+            return True
+
+    return False
+
+
+async def has_external_apply_button(page: Page) -> bool:
+    """Detect LinkedIn jobs that require applying outside LinkedIn."""
+    details_panel = page.locator(JOBS_CONTAINER_SELECTOR).last
+    apply_button = details_panel.get_by_role("link", name="Apply")
+    if await apply_button.count() > 0:
+        return True
+
+    return await details_panel.get_by_text("Responses managed off LinkedIn").count() > 0
 
 
 # ---------------------------------------------------------------------------
