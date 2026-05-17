@@ -41,7 +41,10 @@ POST_SUBMIT_CONFIRMATION_SELECTORS = [
 ]
 
 # Bail out if the modal somehow loops this many times
-MAX_MODAL_DEPTH = 10
+MAX_MODAL_DEPTH = 15
+
+# "Save this application?" confirmation that appears after clicking the modal X
+DISCARD_CONFIRM_SELECTOR = 'div[data-test-modal-id="data-test-easy-apply-discard-confirmation"]'
 
 
 async def wait_for_submit_confirmation(page: Page) -> bool:
@@ -72,28 +75,37 @@ async def dismiss_post_submit_modal(page: Page) -> None:
 
 
 async def close_easy_apply_modal(modal: Locator, page: Page) -> None:
-    """Best-effort dismissal of the Easy Apply modal without saving.
+    """Dismiss the Easy Apply modal without saving.
 
-    Clicks the modal's Dismiss (X) button, then clicks Discard on
-    LinkedIn's "Save application?" confirmation if it appears.
+    Two-step flow LinkedIn uses when closing mid-application:
+      1. Click the X button (data-test-modal-close-btn) in the modal header.
+      2. Wait for the "Save this application?" confirmation overlay, then
+         click Discard so no draft is saved.
 
-    Failures are swallowed: if dismissal doesn't work, the next job-card
-    click will navigate away anyway.
+    Failures are logged but not re-raised — if dismissal silently fails the
+    next job-card click will navigate away and the modal will be gone anyway.
     """
+    # Step 1: click the X button inside the easy apply modal.
+    # Use the stable data-test-modal-close-btn attribute rather than aria-label
+    # (aria-label value can change with LinkedIn localisation).
     try:
-        dismiss = modal.locator("button[aria-label*='Dismiss']").first
-        if await dismiss.count() > 0 and await dismiss.is_visible(timeout=1000):
-            await dismiss.click()
+        dismiss = modal.locator("button[data-test-modal-close-btn]").first
+        await dismiss.wait_for(state="visible", timeout=3000)
+        await dismiss.click()
+        print("[easy_apply] Clicked modal dismiss (X) button.")
     except Exception as exc:
         print(f"[easy_apply] Modal dismiss click failed: {exc}")
         return
 
-    # LinkedIn often surfaces a "Save application?" confirmation dialog.
-    # We don't want to save half-filled drafts, so click Discard.
+    # Step 2: wait for the "Save this application?" confirmation overlay,
+    # then click Discard so no draft is saved.
     try:
-        discard = page.get_by_role("button", name="Discard")
-        if await discard.count() > 0 and await discard.first.is_visible(timeout=1500):
-            await discard.first.click()
+        confirm = page.locator(DISCARD_CONFIRM_SELECTOR)
+        await confirm.wait_for(state="visible", timeout=3000)
+        discard = confirm.get_by_role("button", name="Discard")
+        await discard.wait_for(state="visible", timeout=2000)
+        await discard.click()
+        print("[easy_apply] Clicked Discard on save-confirmation dialog.")
     except Exception as exc:
         print(f"[easy_apply] Discard click failed (safe to ignore): {exc}")
 

@@ -97,7 +97,7 @@ class TelegramClient:
 
     # ----------------------------------------------------------- public API
 
-    def send_message(self, text: str, parse_mode: str = "Markdown") -> int:
+    def send_message(self, text: str, parse_mode: str = "HTML") -> int:
         """Send ``text`` to the configured chat. Returns the bot's ``message_id``."""
         result = self._call(
             "sendMessage",

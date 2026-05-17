@@ -4,8 +4,14 @@ Kept apart from the client and the orchestrator so tweaking copy (or adding
 new templates later — e.g. yes/no inline keyboards) doesn't touch the
 HTTP layer.
 
-All output is Telegram-flavoured Markdown.
+All output uses Telegram HTML parse_mode. HTML is chosen over Markdown because
+LinkedIn field labels and question text often contain underscores, asterisks,
+parentheses, and other characters that silently corrupt Telegram's Markdown
+parser and produce HTTP 400 errors. With HTML mode we html.escape() every
+dynamic value so no user-supplied string can ever break the message.
 """
+
+import html
 
 # Cap any single field/question/job string so a runaway label can't blow
 # past Telegram's 4096-char message limit.
@@ -20,6 +26,11 @@ def _shorten(text: str, limit: int) -> str:
     return text[: limit - 1] + "…"
 
 
+def _e(text: str, limit: int) -> str:
+    """Shorten then HTML-escape a dynamic string safe for Telegram HTML mode."""
+    return html.escape(_shorten(text, limit))
+
+
 def build_question_message(
     field: str,
     question: str,
@@ -27,23 +38,23 @@ def build_question_message(
 ) -> str:
     """Build the initial prompt asking the user to fill in a missing field."""
     lines = [
-        "*Easy Apply needs your input*",
+        "<b>Easy Apply needs your input</b>",
         "",
-        f"*Field:* {_shorten(field, _LABEL_MAX)}",
-        f"*Question:* {_shorten(question, _LABEL_MAX)}",
+        f"<b>Field:</b> {_e(field, _LABEL_MAX)}",
+        f"<b>Question:</b> {_e(question, _LABEL_MAX)}",
     ]
     if job_context:
-        lines.append(f"*Job:* {_shorten(job_context, _JOB_MAX)}")
+        lines.append(f"<b>Job:</b> {_e(job_context, _JOB_MAX)}")
     lines.append("")
-    lines.append("_Reply to this message with your answer._")
+    lines.append("<i>Reply to this message with your answer.</i>")
     return "\n".join(lines)
 
 
 def build_reminder_message(field: str) -> str:
     """Build the follow-up reminder sent after the first attempt times out."""
     return (
-        "*Still waiting on an answer*\n\n"
-        f"Field: `{_shorten(field, _LABEL_MAX)}`\n\n"
-        "_Reply to the previous question with your answer. "
-        "If no reply arrives soon, this application will be marked as failed._"
+        "<b>Still waiting on an answer</b>\n\n"
+        f"Field: <code>{_e(field, _LABEL_MAX)}</code>\n\n"
+        "<i>Reply to the previous question with your answer. "
+        "If no reply arrives soon, this application will be marked as failed.</i>"
     )
